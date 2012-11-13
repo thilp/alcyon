@@ -1,8 +1,10 @@
-package Hermes;
+package Core::Hermes;
 
 use strict;
 use warnings;
+use parent 'Class::Singleton';
 
+use Carp;
 use YAML::XS;
 use LWP::UserAgent;
 use HTML::Entities;
@@ -28,12 +30,12 @@ our $VERSION = 1.0;
 #		(default: 5);
 #	- verbose: (optional) does Hermes display detailled
 #		warning and error messages? (default: 0).
-sub new
+sub _new_instance
 {
   my ($class, %args) = @_;
   my $self = {};
 
-  $self->{url} = $args{url} or die "No URL provided!";
+  $self->{url} = $args{url} or croak "No URL provided!";
 
   if (exists $args{username} and exists $args{password})
   { # authentified connection
@@ -68,31 +70,29 @@ sub new
       lgname => $self->{username},
       lgpassword => $args{password}
     );
-    if ($ans->{login}->{result} eq 'Success')
+    if ($ans->{login}{result} eq 'Success')
     {
-      $self->{sessionid} = $ans->{login}->{sessionid};
+      $self->{sessionid} = $ans->{login}{sessionid};
       $self->notice("you successfully logged in as $self->{username}");
-      return $self;
     }
-    elsif ($ans->{login}->{result} eq 'NeedToken')
+    elsif ($ans->{login}{result} eq 'NeedToken')
     {
       $ans = $self->ask(
 	action => 'login',
 	lgname => $self->{username},
 	lgpassword => $args{password},
-	lgtoken => $ans->{login}->{token}
+	lgtoken => $ans->{login}{token}
       );
-      die "Unable to log in with this (username,password) couple! (server ".
-      "answered: `$ans->{login}->{result}')\n"
-      unless ($ans->{login}->{result} eq 'Success');
-      $self->{sessionid} = $ans->{login}->{sessionid};
+      croak "Unable to log in with this (username,password) couple! (server ".
+      "answered: `$ans->{login}{result}')"
+	unless ($ans->{login}{result} eq 'Success');
+      $self->{sessionid} = $ans->{login}{sessionid};
       $self->notice("you successfully logged in as $self->{username}");
-      return $self;
     }
     else
     {
-      die "Unable to log in with this (username,password) couple! (server ".
-      "answered: `$ans->{login}->{result}')\n";
+      croak "Unable to log in with this (username,password) couple! (server ".
+      "answered: `$ans->{login}{result}')";
     }
   }
   else
@@ -101,6 +101,17 @@ sub new
       "be able to access to certain API features");
     return $self;
   }
+
+  # Get edit token.
+  my $ans = $self->ask(
+    action	=> 'query',
+    prop	=> 'info',
+    intoken	=> 'edit|delete|protect|move|block|unblock'
+  );
+
+  print Dump($ans);
+
+  return $self;
 }
 
 
@@ -139,9 +150,8 @@ sub ask
       eval { $r = Load($r); };
       if ($@)
       {
-	print "An error occurred while Load()ing the YAML into Perl:\n";
-	print $@."\nThe server answer was:\n";
-	print $answer->decoded_content()."\n";
+	carp "An error occurred while Load()ing the YAML into Perl: $@\nThe ".
+	  "server answer was: ".$answer->decoded_content();
 	return undef;
       }
       return $r;
