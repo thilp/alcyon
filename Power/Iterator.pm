@@ -1,4 +1,4 @@
-package Iterator;
+package Power::Iterator;
 
 
 #------------------------------------------------------------------------
@@ -13,7 +13,7 @@ package Iterator;
 #------------------------------------------------------------------------
 
 
-use parent qw(Exporter);
+use parent 'Exporter';
 
 our @EXPORT = qw(Iterator pick);
 
