@@ -4,27 +4,27 @@ use strict;
 use warnings;
 use 5.010;
 
+use parent 'Class::Singleton';
+
 use Carp;
 use YAML::XS 0.38;
 use LWP::UserAgent 6.03;
 use LWP::Protocol::https 6.03;
 use HTML::Entities 3.69;
+
 #   Think at Term::ReadPassword if you want to dynamically ask the
 #   user its password (or if you don't want to store it in
 #   the code, which seems a perfect attitude to me).
 
 our $VERSION = 1.1;
 
-
-sub new {
+sub _new_instance {
     my ( $class, %args ) = @_;
     my $self = {};
 
     $self->{url} = $args{url} or croak "No URL provided!";
 
-    if ( exists $args{username} and exists $args{password} ) {
-
-        # authentified connection
+    if ( exists $args{username} and exists $args{password} ) { # authentified
         notice('setting up an authentified connection') if $args{verbose};
         $self->{username} = $args{username};
     }
@@ -56,30 +56,29 @@ sub new {
             lgname     => $self->{username},
             lgpassword => $args{password}
         );
-        if ( $ans->{login}->{result} eq 'Success' ) {
-            $self->{sessionid} = $ans->{login}->{sessionid};
+        if ( $ans->{login}{result} eq 'Success' ) {
+            $self->{sessionid} = $ans->{login}{sessionid};
             $self->notice("you successfully logged in as $self->{username}");
-            return $self;
         }
-        elsif ( $ans->{login}->{result} eq 'NeedToken' ) {
+        elsif ( $ans->{login}{result} eq 'NeedToken' ) {
             $ans = $self->ask(
                 action     => 'login',
                 lgname     => $self->{username},
                 lgpassword => $args{password},
-                lgtoken    => $ans->{login}->{token}
+                lgtoken    => $ans->{login}{token}
             );
-            die
+            croak
               "Unable to log in with this (username,password) couple! (server "
-              . "answered: `$ans->{login}->{result}')\n"
-              unless ( $ans->{login}->{result} eq 'Success' );
-            $self->{sessionid} = $ans->{login}->{sessionid};
+              . "answered: `$ans->{login}{result}')\n"
+              unless ( $ans->{login}{result} eq 'Success' );
+            $self->{sessionid} = $ans->{login}{sessionid};
             $self->notice("you successfully logged in as $self->{username}");
             return $self;
         }
         else {
-            die
+            croak
               "Unable to log in with this (username,password) couple! (server "
-              . "answered: `$ans->{login}->{result}')\n";
+              . "answered: `$ans->{login}{result}')\n";
         }
     }
     else {
@@ -88,8 +87,18 @@ sub new {
               . "be able to access to certain API features" );
         return $self;
     }
-}
 
+    # Get edit token.
+    my $ans = $self->ask(
+        action  => 'query',
+        prop    => 'info',
+        intoken => 'edit|delete|protect|move|block|unblock'
+    );
+
+    print Dump($ans);
+
+    return $self;
+}
 
 sub ask {
     my ( $self, %args ) = @_;
@@ -111,8 +120,8 @@ sub ask {
         );
         if ( $answer->is_success ) {
 
-        # Directly returns the YAML structure loaded into
-        # a Perl hash reference.
+            # Directly returns the YAML structure loaded into
+            # a Perl hash reference.
             ( my $r = $answer->decoded_content( raise_error => 1 ) ) =~
               s| \\/ |/|xg;
             eval { $r = Load($r) } or carp <<"EOF",
