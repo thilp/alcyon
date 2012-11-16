@@ -4,103 +4,145 @@ use strict;
 use warnings;
 use 5.010;
 
-use parent 'Class::Singleton';
-
 use Carp;
 use YAML::XS 0.38;
 use LWP::UserAgent 6.03;
 use LWP::Protocol::https 6.03;
 use HTML::Entities 3.69;
 
-#   Think at Term::ReadPassword if you want to dynamically ask the
-#   user its password (or if you don't want to store it in
-#   the code, which seems a perfect attitude to me).
+# Think at Term::ReadPassword if you want to dynamically ask the
+# user its password (or if you don't want to store it in
+# the code, which seems a perfect attitude to me).
 
-our $VERSION = 1.1;
+our $VERSION = 1.2;
 
-sub _new_instance {
+our $_instance = undef;
+our %params    = ();
+
+######################################################################
+
+# Generate a closure.
+sub get {
     my ( $class, %args ) = @_;
-    my $self = {};
+    our $_instance;
 
-    $self->{url} = $args{url} or croak "No URL provided!";
+    unless ( defined $_instance and _same_params(%args) ) {
+        $_instance = { verbose => $args{verbose} };
+        bless $_instance => $class;
+        $_instance->notice( 'generating a new instance of ' . ref $_instance );
 
-    if ( exists $args{username} and exists $args{password} ) { # authentified
-        notice('setting up an authentified connection') if $args{verbose};
-        $self->{username} = $args{username};
-    }
-    else {    # anonymous connection
-        notice('setting up an anonymous connection') if $args{verbose};
-    }
-    $self->{tolerance} = exists $args{tolerance} ? $args{tolerance} : 5;
-    $self->{verbose} = $args{verbose};
-    ( $self->{domain} = $args{url} ) =~ s%^https?://([^/]+)%$1%;
-    $self->{ua} = LWP::UserAgent->new(
-        agent =>
+        $_instance->{url} = $args{url} or croak "No URL provided!";
+        $_instance->{tolerance} = $args{tolerance} // 5;
+        ( $_instance->{domain} = $args{url} ) =~ s{
+            ^ https? :// ( [^ / ]+ )
+        }{lc $1}exi;
+
+        $_instance->{ua} = LWP::UserAgent->new(
+            agent =>
 "Hermes/$VERSION (Hyperion/6; +http://fr.vikidia.org/wiki/user:thilp)",
-        from       => 'thilp.is@gmail.com',
-        cookie_jar => { file => '.cookies.txt', autosave => 1 },
-        max_size   => 2_000_000,
-        timeout    => 10,
-        protocols_allowed => [ 'http', 'https' ],
-        ssl_opts => { verify_hostname => $args{certified} || 0 },
+            from       => 'thilp.is@gmail.com',
+            cookie_jar => { file => '.cookies.txt', autosave => 1 },
+            max_size   => 2_000_000,
+            timeout    => 10,
+            protocols_allowed => [ 'http', 'https' ],
+            ssl_opts => { verify_hostname => $args{certified} || 0 },
 
-        # PROXY USERS: you might want to add some code here to set the proxy
-        # options of LWP
+            # PROXY USERS: you might want to add some code here to set the proxy
+            # options of LWP
+        );
+
+        if ( exists $args{username} and exists $args{password} )
+        {    # authentified
+            $_instance->notice('setting up an authentified connection');
+            $_instance->{username} = $args{username};
+            $_instance->_login( $args{password} );
+        }
+        else {    # anonymous connection
+            $_instance->notice('setting up an anonymous connection');
+        }
+
+        %params = %args;
+    }
+
+    return sub {
+        my $query = shift;
+        return $_instance->_ask($query);
+      }
+}
+
+######################################################################
+
+# Check if the given hash has the same fields than the registered hash.
+sub _same_params {
+    my (%new_params) = @_;
+    our %params;
+
+    foreach my $k ( keys %params ) {
+        return 0 if $params{$k} ne $new_params{$k};
+    }
+
+    return 1;
+}
+
+######################################################################
+
+sub _login {
+    my ( $self, $password ) = @_;
+
+    return 0 unless exists $self->{username} and defined $password;
+
+    my $answ = $self->_ask(
+        action     => 'login',
+        lgname     => $self->{username},
+        lgpassword => $password
     );
-    bless $self => $class;
-
-    # Login
-    if ( exists $self->{username} ) {
-        my $ans = $self->ask(
+    ################
+    if ( $answ->{login}{result} eq 'Success' ) {
+        $self->{sessionid} = $answ->{login}{sessionid};
+        $self->notice("you are now logged in as $self->{username}");
+    }
+    ################
+    elsif ( $answ->{login}{result} eq 'NeedToken' ) {
+        $answ = $self->_ask(
             action     => 'login',
             lgname     => $self->{username},
-            lgpassword => $args{password}
+            lgpassword => $password,
+            lgtoken    => $answ->{login}{token}
         );
-        if ( $ans->{login}{result} eq 'Success' ) {
-            $self->{sessionid} = $ans->{login}{sessionid};
-            $self->notice("you successfully logged in as $self->{username}");
-        }
-        elsif ( $ans->{login}{result} eq 'NeedToken' ) {
-            $ans = $self->ask(
-                action     => 'login',
-                lgname     => $self->{username},
-                lgpassword => $args{password},
-                lgtoken    => $ans->{login}{token}
-            );
-            croak
-              "Unable to log in with this (username,password) couple! (server "
-              . "answered: `$ans->{login}{result}')\n"
-              unless ( $ans->{login}{result} eq 'Success' );
-            $self->{sessionid} = $ans->{login}{sessionid};
-            $self->notice("you successfully logged in as $self->{username}");
-            return $self;
+        if ( $answ->{login}{result} eq 'Success' ) {
+            $self->{sessionid} = $answ->{login}{sessionid};
+            $self->notice("you are now logged in as $self->{username}");
         }
         else {
-            croak
-              "Unable to log in with this (username,password) couple! (server "
-              . "answered: `$ans->{login}{result}')\n";
+            carp <<"EOF"; return 0;
+Unable to log in with this (username,password) couple! Server answered:
+$answ->{login}{result}
+EOF
         }
     }
+    ################
     else {
-        $self->notice(
-                "recall the fact that you are not logged in: you may not "
-              . "be able to access to certain API features" );
-        return $self;
+        carp <<"EOF"; return 0;
+Unable to log in with this (username,password) couple! Server answered:
+$answ->{login}{result}
+EOF
     }
 
     # Get edit token.
-    my $ans = $self->ask(
+    $answ = $self->_ask(
         action  => 'query',
         prop    => 'info',
         intoken => 'edit|delete|protect|move|block|unblock'
     );
 
-    print Dump($ans);
+    print Dump($answ);
 
-    return $self;
+    return 1;
 }
 
-sub ask {
+######################################################################
+
+sub _ask {
     my ( $self, %args ) = @_;
 
     if ( $args{transmission_html_encode} ) {
@@ -124,13 +166,12 @@ sub ask {
             # a Perl hash reference.
             ( my $r = $answer->decoded_content( raise_error => 1 ) ) =~
               s| \\/ |/|xg;
-            eval { $r = Load($r) } or carp <<"EOF",
+            eval { $r = Load($r) } or (carp <<"EOF"), return;
 An error occurred while Load()ing the YAML into Perl:
 $@
 The server's answer was:
 @{[ $answer->decoded_content() ]}
 EOF
-              return;
             return $r;
         }
         else {
@@ -152,25 +193,25 @@ EOF
     return;
 }
 
+######################################################################
 
 sub notice {
     my $self = shift;
-    if ( ref $self eq 'Hermes' ) {
-        return unless ( $self->{verbose} );
-        print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
-    }
-    else {
-        print STDERR "\t\033[36mHermes::notice:\033[0m ", $self, @_, "\n";
-    }
+    return unless ( $self->{verbose} );
+    print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
     return;
 }
 
+######################################################################
+
 sub DESTROY {
     my $self = shift;
-    $self->ask( action => 'logout' );
+    $self->_ask( action => 'logout' );
     $self->notice("user $self->{username} logged out");
     return;
 }
+
+######################################################################
 
 #
 1;
@@ -182,17 +223,17 @@ Alcyon::Core::Hermes - Communicate with the MediaWiki API.
 
 =head1 VERSION
 
-This is version 1.1 of C<Alcyon::Core::Hermes>, dated November 13, 2012.
+This is version 1.2 of C<Alcyon::Core::Hermes>, dated November 16, 2012.
 
 =head1 SYNOPSIS
 
-    my $hermes = Alcyon::Core::Hermes->new(
+    my $hermes = Alcyon::Core::Hermes->get(
         url => 'https://fr.vikidia.org/w/api.php',
         username => $pseudo,
         password => $pass
     );
 
-    my $API_answer = $hermes->ask(
+    my $API_answer = $hermes->(
         action => 'query',
         ...
     );
@@ -204,14 +245,21 @@ allows to I<perl>ishly query the MediaWiki API and get I<perl>ish answers;
 that is, you give Perl data structures and get back Perl data structures,
 although everything in between has nothing to do with Perl (HTTP, JSON, etc.).
 
+The Hermes “object” you get (by calling get()) is actually not a real object
+but a closure (i.e. a reference on a Perl subroutine with its own scope).
+That's why you use it through this strange (but short and efficient) syntax:
+
+    my $answer = $hermes->( %my_query );
+
 =head1 SUBROUTINES/METHODS
 
 =over
 
-=item C<< new( url => $url, username => $uname, password => $upass
+=item C<< get( url => $url, username => $uname, password => $upass
 [, certified => 0 ] [, tolerance => 5 ] [, verbose => 0 ] ) >>
 
-Constructor of Hermes objects. Parameters:
+Hermes is a singleton; this method returns the only Hermes instance,
+constructing it if needed. Parameters:
 
 =over
 
@@ -260,16 +308,28 @@ Defaults to 0 (I<false>).
 
 =back
 
-=item C<ask( %args )>
+=item Using a Hermes closure
 
-Send a request to the API. It returns a (probably nested) Perl structure,
+When you do:
+
+    my $hermes = Alcyon::Core::Hermes->get( %params );
+
+you get a closure in C<$hermes>. This closure allows you to send all your
+requests to the API. It returns a (probably nested) Perl structure,
 such as a hash or an array, containing the various pieces of the API's answer.
 
+Use this closure as follow:
+
+    my $answer = $hermes->( %args );
+
 C<%args> contains the parameters of the call:
-each one is passed as a "C<< key => value >>" row.
+each parameter is passed as a "C<< key => value >>" row. All parameters are
+described on the MediaWiki wiki: https://www.mediawiki.org/wiki/API; or
+directly on your target wiki, by loading the API page in your Web browser
+(for Vikidia: https://fr.vikidia.org/w/api.php).
 
 In addition to the traditional API parameters, you can set (or explicitely
-unset, if you want to) the `C<transmission_html_encode>' option so that the
+unset, if you want so) the `C<transmission_html_encode>' option so that the
 characters are encoded with HTML::Entities; this is discouraged for
 I<login> requests.
 
