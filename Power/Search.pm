@@ -9,7 +9,7 @@ our $VERSION = 1.0;
 use Carp;
 use re::engine::RE2 0.11;
 
-use Core::Hermes 1.0;
+use Alcyon::Core::Hermes 1.2;
 
 
 # utiliser srwhat=text
