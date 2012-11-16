@@ -24,7 +24,7 @@ sub _new_instance {
 
     $self->{url} = $args{url} or croak "No URL provided!";
 
-    if ( exists $args{username} and exists $args{password} ) { # authentified
+    if ( exists $args{username} and exists $args{password} ) {    # authentified
         notice('setting up an authentified connection') if $args{verbose};
         $self->{username} = $args{username};
     }
@@ -56,7 +56,11 @@ sub _new_instance {
             lgname     => $self->{username},
             lgpassword => $args{password}
         );
-        if ( $ans->{login}{result} eq 'Success' ) {
+        if ( not defined $ans ) {
+            carp "Can't get an answer from the API: aborting.";
+            exit 1;
+        }
+        elsif ( $ans->{login}{result} eq 'Success' ) {
             $self->{sessionid} = $ans->{login}{sessionid};
             $self->notice("you successfully logged in as $self->{username}");
         }
@@ -100,6 +104,11 @@ sub _new_instance {
     return $self;
 }
 
+sub new {
+    my $class = shift;
+    return $class->instance(@_);
+}
+
 sub ask {
     my ( $self, %args ) = @_;
 
@@ -128,7 +137,7 @@ sub ask {
 An error occurred while Load()ing the YAML into Perl:
 $@
 The server's answer was:
-@{[ $answer->decoded_content() ]}
+@{[ $answer->decoded_content ]}
 EOF
               return;
             return $r;
@@ -144,25 +153,21 @@ EOF
     }
 
     # None of the $self->{tolerance} attempts has terminated correctly.
-    $self->notice(<<'EOF');
-Error: I have not been able to properly transfer the request
-or to receive the API server's answer.
-Returning UNDEF
-EOF
+    $self->notice(q{Error: I have not been able to properly transfer the
+        request or to receive the API server's answer.});
     return;
 }
 
-
 sub notice {
     my $self = shift;
-    if ( ref $self eq 'Hermes' ) {
-        return unless ( $self->{verbose} );
-        print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
+    if ( ref $self eq 'Alcyon::Core::Hermes' ) {
+        return 0 unless ( $self->{verbose} );
+        say STDERR "\t\033[36mHermes::notice:\033[0m ", @_;
     }
     else {
-        print STDERR "\t\033[36mHermes::notice:\033[0m ", $self, @_, "\n";
+        say STDERR "\t\033[36mHermes::notice:\033[0m ", $self, @_;
     }
-    return;
+    return 1;
 }
 
 sub DESTROY {
