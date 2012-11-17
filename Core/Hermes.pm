@@ -9,6 +9,7 @@ use YAML::XS 0.38;
 use LWP::UserAgent 6.03;
 use LWP::Protocol::https 6.03;
 use HTML::Entities 3.69;
+use Data::Dump;
 
 # Think at Term::ReadPassword if you want to dynamically ask the
 # user its password (or if you don't want to store it in
@@ -135,10 +136,10 @@ EOF
     $answ = $self->_ask(
         action  => 'query',
         prop    => 'info',
-        intoken => 'edit|delete|protect|move|block|unblock'
+        intoken => 'edit'
     );
 
-    print Dump($answ);
+    dd($answ);
 
     return 1;
 }
