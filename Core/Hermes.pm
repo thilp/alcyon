@@ -9,7 +9,6 @@ use YAML::XS 0.38;
 use LWP::UserAgent 6.03;
 use LWP::Protocol::https 6.03;
 use HTML::Entities 3.69;
-use Data::Dump;
 
 # Think at Term::ReadPassword if you want to dynamically ask the
 # user its password (or if you don't want to store it in
@@ -135,11 +134,12 @@ EOF
     # Get edit token.
     $answ = $self->_ask(
         action  => 'query',
+        titles  => 'Utilisateur:Alcyon',
         prop    => 'info',
         intoken => 'edit'
     );
-
-    dd($answ);
+    my ($tmp) = values %{ $answ->{query}{pages} };
+    $self->{edittoken} = $tmp->{edittoken};
 
     return 1;
 }
@@ -170,7 +170,7 @@ sub _ask {
             # a Perl hash reference.
             ( my $r = $answer->decoded_content( raise_error => 1 ) ) =~
               s| \\/ |/|xg;
-            eval { $r = Load($r) } or (carp <<"EOF"), return;
+            eval { $r = Load($r) } or ( carp <<"EOF"), return;
 An error occurred while Load()ing the YAML into Perl:
 $@
 The server's answer was:
@@ -189,8 +189,10 @@ EOF
     }
 
     # None of the $self->{tolerance} attempts has terminated correctly.
-    $self->notice(q{Error: I have not been able to properly transfer the
-        request or to receive the API server's answer.});
+    $self->notice(
+        q{Error: I have not been able to properly transfer the
+        request or to receive the API server's answer.}
+    );
     return;
 }
 
