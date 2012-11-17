@@ -1,2 +1,40 @@
-alcyon
-======
+=head1 NAME
+
+Alcyon - “Smartgic” robot for lucky wikis.
+
+=head1 VERSION
+
+This is version 0.2 of Alcyon, currently under development.
+
+=head1 DESCRIPTION
+
+Alcyon is a set of Perl modules allowing programs to interact with MediaWiki's
+API. It aims to eventually be an user-helping AI for:
+
+=over
+
+=item *
+
+counter-vandalism;
+
+=item *
+
+daily, boring tasks;
+
+=item *
+
+one-shot, huge, repetitive tasks.
+
+=back
+
+There is a particular emphasis on the efficiency, the object design and the
+documentation.
+
+=head1 AUTHOR
+
+thilp
+
+=head1 LICENSE AND COPYRIGHT
+
+All this work is released under the GNU Public License, version 3 or later.
+For further information, please visit https://www.gnu.org/licenses/gpl.html.
