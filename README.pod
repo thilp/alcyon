@@ -1,6 +1,6 @@
 =head1 NAME
 
-Alcyon - “Smartgic” robot for lucky wikis.
+Alcyon - "Smartgic" robot for lucky wikis.
 
 =head1 VERSION
 
@@ -37,4 +37,5 @@ thilp
 =head1 LICENSE AND COPYRIGHT
 
 All this work is released under the GNU Public License, version 3 or later.
+
 For further information, please visit https://www.gnu.org/licenses/gpl.html.

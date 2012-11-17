@@ -33,7 +33,7 @@ such as log-writing and configuration information transmitting.
 
 use Carp;
 use Alcyon::Core::Axiom 1.0;
-use Alcyon::Core::Hermes 1.1;
+use Alcyon::Core::Hermes 1.2;
 
 =pod #########################################################################
 
@@ -54,7 +54,7 @@ sub new {
     my $class = shift;
     my $self  = {
         config => Alcyon::Core::Axiom->get,
-        api    => Alcyon::Core::Hermes->instance
+        api    => Alcyon::Core::Hermes->get
     };
 
     bless $self => $class;
@@ -87,13 +87,14 @@ sub log ($@) {
 
 =item C<mediawiki(%args)>
 
-A thin wrapper around the C<Alcyon::Core::Hermes::ask> method.
+Call the MediaWiki's API directly from this object thru the Hermes object
+it contains.
 
 =cut
 
 sub mediawiki {
     my $self = shift;
-    return $self->{api}->ask(@_);
+    return $self->{api}->(@_);
 }
 
 =back
