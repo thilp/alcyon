@@ -5,11 +5,13 @@ HTML=Axiom.html		\
 all: doc
 	@echo "Documentation of \`Core' generated."
 
-doc: clean $(HTML)
+displaydoc: doc
 	firefox $(HTML) \
 	  || chromium-browser $(HTML) \
 	  || google-chrome $(HTML) \
 	  || opera $(HTML) &
+
+doc: clean $(HTML)
 
 %.html: %.pm
 	pod2html $< > $@

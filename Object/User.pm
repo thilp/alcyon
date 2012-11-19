@@ -3,7 +3,6 @@ package Alcyon::Object::User;
 use strict;
 use warnings;
 use 5.010;
-use mro 'c3';
 use parent 'Alcyon::Object';
 
 =head1 NAME
@@ -85,7 +84,7 @@ sub new {
     croak "The `born' argument passed for the new User is not a DateTime!"
       unless ref $args{born} eq 'DateTime';
 
-    my $self = next::method($class);
+    my $self = new Alcyon::Object;
 
     $self->{name} = ucfirst $args{name};
     $self->{rank} = $args{rank};

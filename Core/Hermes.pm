@@ -18,6 +18,7 @@ our $VERSION = 1.2;
 
 our $_instance = undef;
 our %params    = ();
+our %lazyness  = {};
 
 ######################################################################
 
@@ -189,11 +190,16 @@ EOF
     }
 
     # None of the $self->{tolerance} attempts has terminated correctly.
-    $self->notice(
-        q{Error: I have not been able to properly transfer the
-        request or to receive the API server's answer.}
-    );
+    $self->notice( "Error: I have not been able to properly transfer the "
+          . "request or to receive the API server's answer." );
     return;
+}
+
+######################################################################
+
+sub lazy ($&@) {
+    my ( $class, $codeblock, %query ) = @_;
+
 }
 
 ######################################################################
@@ -335,6 +341,51 @@ In addition to the traditional API parameters, you can set (or explicitely
 unset, if you want so) the `C<transmission_html_encode>' option so that the
 characters are encoded with HTML::Entities; this is discouraged for
 I<login> requests.
+
+=item C<lazy {> I<operations> C<} %params >
+
+This method allows Hermes to be B<lazy>, which is a great virtue when using
+the network.
+
+C<%params> is exactly what you would use with a Hermes closure (i.e. the
+parameters to be given to the MediaWiki API) plus an optional key (see below).
+However, lazy() does not return the data as the closure does; what is
+returned is an C<Alcyon::Core::Hermes::Lazy> object that does not really
+call the API right now.
+Instead, it stores the query (C<%params>) and the related extraction code (the
+I<operations> code block) and, when the API is contacted for some other
+(but similar) request, this query will be included too.
+
+This way:
+
+=over
+
+=item 1.
+
+Data that will eventually never be used are never fetched.
+
+=item 2.
+
+Data that are frequently used (but rarely changes) are fetched only once.
+
+=back
+
+You can set the I<timeout> (after this duration, the data are considered as
+too old and are refreshed when needed) with the optional C<timeout> key in
+C<%params>:
+
+    my $editcount = Alcyon::Core::Hermes->lazy
+        { $_->{query}{users}[0]{editcount} } # get the desired value
+        (
+            action => 'query',
+            list => 'users',
+            ususers => 'Alcyon',
+            usprop => 'editcount',
+            timeout => 60           # timeout after 1 minute
+        );
+
+See the documentation of C<Alcyon::Core::Hermes::Lazy> for how to use such
+objects.
 
 =back
 
