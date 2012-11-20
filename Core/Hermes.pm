@@ -4,23 +4,160 @@ use strict;
 use warnings;
 use 5.010;
 
+our $VERSION = 1.2;
+
+=head1 NAME
+
+Alcyon::Core::Hermes - Communicate with the MediaWiki API.
+
+=head1 VERSION
+
+This is version 1.2 of C<Alcyon::Core::Hermes>, dated November 16, 2012.
+
+=head1 SYNOPSIS
+
+    my $hermes = Alcyon::Core::Hermes->get(
+        url => 'https://fr.vikidia.org/w/api.php',
+        username => $pseudo,
+        password => $pass
+    );
+
+    my $API_answer = $hermes->(
+        action => 'query',
+        ...
+    );
+
+=head1 DESCRIPTION
+
+Hermes has been designed for efficiency, flexibility and ease of use. It
+allows to I<perl>ishly query the MediaWiki API and get I<perl>ish answers;
+that is, you give Perl data structures and get back Perl data structures,
+although everything in between has nothing to do with Perl (HTTP, JSON, etc.).
+
+The Hermes “object” you get (by calling get()) is actually not a real object
+but a closure (i.e. a reference on a Perl subroutine with its own scope).
+That's why you use it through this strange (but short and efficient) syntax:
+
+    my $answer = $hermes->( %my_query );
+
+=head1 DEPENDENCIES
+
+    Carp;
+    Digest::MD5
+    YAML::XS                    0.38;
+    LWP::UserAgent              6.02;
+    LWP::Protocol::https        6.02;
+    HTML::Entities              3.69;
+    Alcyon::Core::Hermes::Lazy  1.0;
+
+=cut
+
 use Carp;
 use YAML::XS 0.38;
-use LWP::UserAgent 6.03;
-use LWP::Protocol::https 6.03;
+use LWP::UserAgent 6.02;
+use LWP::Protocol::https 6.02;
 use HTML::Entities 3.69;
+use Digest::MD5 'md5';
+use Alcyon::Core::Hermes::Lazy 1.0;
 
 # Think at Term::ReadPassword if you want to dynamically ask the
 # user its password (or if you don't want to store it in
 # the code, which seems a perfect attitude to me).
 
-our $VERSION = 1.2;
+use constant {
+    LAZY_DEFAULT_TIMEOUT => 1800,          # half an hour
+    LAZY_SEED            => 0xd9ec472a,    # no more than 0xffffffff;
+};
 
 our $_instance = undef;
 our %params    = ();
-our %lazyness  = {};
+our $lazyness  = {};
 
 ######################################################################
+
+=head1 SUBROUTINES/METHODS
+
+=over
+
+=item C<< get( url => $url, username => $uname, password => $upass
+[, certified => 0 ] [, tolerance => 5 ] [, verbose => 0 ] ) >>
+
+Hermes is a singleton; this method returns the only Hermes instance,
+constructing it if needed. Parameters:
+
+=over
+
+=item url
+
+The URL of the MediaWiki API to interact with.
+
+=item username
+
+(optional for an anonymous connection; mandatory for an authentified one)
+
+The name of the account you want to connect to.
+
+The MediaWiki can be as well accessed I<logged in> as I<anonymously>,
+but some operations need you to be logged in to be performed.
+
+=item password
+
+(optional for an anonymous connection; mandatory for an authentified one)
+
+The password of the account you want to connect to.
+
+=item certified
+
+(optional)
+
+Checks the remote host certificate when this parameter is set to 1; ignores it
+otherwise.
+
+Since Alcyon has been designed for Vikidia, whose certificate is
+auto-signed, the default value of this parameter is B<0>.
+
+=item tolerance
+
+(optional)
+
+Number of times Hermes must try to transmit a request (in case of the first
+attempt should fail). Defaults to 5.
+
+=item verbose
+
+(optional)
+
+When set to I<true>, Hermes can display detailled warnings and error messages.
+Defaults to 0 (I<false>).
+
+=back
+
+=item Using a Hermes closure
+
+When you do:
+
+    my $hermes = Alcyon::Core::Hermes->get( %params );
+
+you get a closure in C<$hermes>. This closure allows you to send all your
+requests to the API. It returns a (probably nested) Perl structure,
+such as a hash or an array, containing the various pieces of the API's answer.
+
+Use this closure as follow:
+
+    my $answer = $hermes->( %args );
+
+C<%args> contains the parameters of the call:
+each parameter is passed as a "C<< key => value >>" row. All parameters are
+described on the MediaWiki wiki: https://www.mediawiki.org/wiki/API; or
+directly on your target wiki, by loading the API page in your Web browser
+(for Vikidia: https://fr.vikidia.org/w/api.php).
+
+In addition to the traditional API parameters, you can set (or explicitely
+unset, if you want so) the `C<transmission_html_encode>' option so that the
+characters are encoded with HTML::Entities; this is discouraged for
+I<login> requests.
+
+=cut
 
 # Generate a closure.
 sub get {
@@ -197,151 +334,6 @@ EOF
 
 ######################################################################
 
-sub lazy ($&@) {
-    my ( $class, $codeblock, %query ) = @_;
-
-}
-
-######################################################################
-
-sub notice {
-    my $self = shift;
-    return unless ( $self->{verbose} );
-    print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
-    return;
-}
-
-######################################################################
-
-sub DESTROY {
-    my $self = shift;
-    $self->_ask( action => 'logout' );
-    $self->notice("user $self->{username} logged out");
-    return;
-}
-
-######################################################################
-
-#
-1;
-__END__
-
-=head1 NAME
-
-Alcyon::Core::Hermes - Communicate with the MediaWiki API.
-
-=head1 VERSION
-
-This is version 1.2 of C<Alcyon::Core::Hermes>, dated November 16, 2012.
-
-=head1 SYNOPSIS
-
-    my $hermes = Alcyon::Core::Hermes->get(
-        url => 'https://fr.vikidia.org/w/api.php',
-        username => $pseudo,
-        password => $pass
-    );
-
-    my $API_answer = $hermes->(
-        action => 'query',
-        ...
-    );
-
-=head1 DESCRIPTION
-
-Hermes has been designed for efficiency, flexibility and ease of use. It
-allows to I<perl>ishly query the MediaWiki API and get I<perl>ish answers;
-that is, you give Perl data structures and get back Perl data structures,
-although everything in between has nothing to do with Perl (HTTP, JSON, etc.).
-
-The Hermes “object” you get (by calling get()) is actually not a real object
-but a closure (i.e. a reference on a Perl subroutine with its own scope).
-That's why you use it through this strange (but short and efficient) syntax:
-
-    my $answer = $hermes->( %my_query );
-
-=head1 SUBROUTINES/METHODS
-
-=over
-
-=item C<< get( url => $url, username => $uname, password => $upass
-[, certified => 0 ] [, tolerance => 5 ] [, verbose => 0 ] ) >>
-
-Hermes is a singleton; this method returns the only Hermes instance,
-constructing it if needed. Parameters:
-
-=over
-
-=item url
-
-The URL of the MediaWiki API to interact with.
-
-=item username
-
-(optional for an anonymous connection; mandatory for an authentified one)
-
-The name of the account you want to connect to.
-
-The MediaWiki can be as well accessed I<logged in> as I<anonymously>,
-but some operations need you to be logged in to be performed.
-
-=item password
-
-(optional for an anonymous connection; mandatory for an authentified one)
-
-The password of the account you want to connect to.
-
-=item certified
-
-(optional)
-
-Checks the remote host certificate when this parameter is set to 1; ignores it
-otherwise.
-
-Since Alcyon has been designed for Vikidia, whose certificate is
-auto-signed, the default value of this parameter is B<0>.
-
-=item tolerance
-
-(optional)
-
-Number of times Hermes must try to transmit a request (in case of the first
-attempt should fail). Defaults to 5.
-
-=item verbose
-
-(optional)
-
-When set to I<true>, Hermes can display detailled warnings and error messages.
-Defaults to 0 (I<false>).
-
-=back
-
-=item Using a Hermes closure
-
-When you do:
-
-    my $hermes = Alcyon::Core::Hermes->get( %params );
-
-you get a closure in C<$hermes>. This closure allows you to send all your
-requests to the API. It returns a (probably nested) Perl structure,
-such as a hash or an array, containing the various pieces of the API's answer.
-
-Use this closure as follow:
-
-    my $answer = $hermes->( %args );
-
-C<%args> contains the parameters of the call:
-each parameter is passed as a "C<< key => value >>" row. All parameters are
-described on the MediaWiki wiki: https://www.mediawiki.org/wiki/API; or
-directly on your target wiki, by loading the API page in your Web browser
-(for Vikidia: https://fr.vikidia.org/w/api.php).
-
-In addition to the traditional API parameters, you can set (or explicitely
-unset, if you want so) the `C<transmission_html_encode>' option so that the
-characters are encoded with HTML::Entities; this is discouraged for
-I<login> requests.
-
 =item C<lazy {> I<operations> C<} %params >
 
 This method allows Hermes to be B<lazy>, which is a great virtue when using
@@ -387,27 +379,80 @@ C<%params>:
 See the documentation of C<Alcyon::Core::Hermes::Lazy> for how to use such
 objects.
 
-=back
+=cut
 
-=head1 DEPENDENCIES
+sub lazy ($&@) {
+    my ( $class, $codeblock, %query ) = @_;
+    our $lazyness;
 
-=over
+    my $timeout = $query{timeout} // LAZY_DEFAULT_TIMEOUT;
+    delete $query{timeout};
 
-=item *
+    my $fingerprint = _lazy_hash %query;
+    if ( $fingerprint == 0 ) {
+        carp q{Can't use lazy() for queries containing `generator', }
+          . q{`export', `login' or `logout'.};
+        return;
+    }
 
-C<YAML::XS>, version 0.38 or later;
+    if ( defined $lazyness->{$fingerprint} ) {
+        $lazyness->{$fingerprint}->adapt_timeout($timeout);
+    }
+    else {
+        $lazyness->{$fingerprint} =
+          Alcyon::Core::Hermes::Lazy->new( $fingerprint, $codeblock, $timeout,
+            %query );
+    }
 
-=item *
+    return $lazyness->{$fingerprint};
+}
 
-C<LWP::UserAgent>, version 6.03 or later;
+sub lazy_flush {
+    foreach my $fp (%$lazyness) {
+        $lazyness->{$fp}->_update;
+    }
+    return;
+}
 
-=item *
+sub _lazy_hash (@) {
+    my %h = @_;
+    return 0
+      if exists $h{generator}
+          or exists $h{export}
+          or exists $h{login}
+          or exists $h{logout};
+    my ( $k, $v );
+    my $result = LAZY_SEED;
+    delete $h{format};
+    while ( ( $k, $v ) = each %h ) {
+        $result = ( $result ^ md5( join '\x07', $k, $v ) ) & 0xffffffff;
+    }
+    return $result;
+}
 
-C<LWP::Protocol::https>, version 6.03 or later;
+######################################################################
 
-=item *
+sub notice {
+    my $self = shift;
+    return unless ( $self->{verbose} );
+    print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
+    return;
+}
 
-C<HTML::Entities>, version 3.69 or later.
+######################################################################
+
+sub DESTROY {
+    my $self = shift;
+    $self->_ask( action => 'logout' );
+    $self->notice("user $self->{username} logged out");
+    return;
+}
+
+######################################################################
+
+#
+1;
+__END__
 
 =back
 
