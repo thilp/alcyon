@@ -7,7 +7,6 @@ use autodie;
 
 our $VERSION = 1.3;
 
-use Data::Dumper;
 
 use Carp;
 use YAML::XS 0.38;
@@ -280,7 +279,7 @@ EOF
 
 ######################################################################
 
-sub notice {
+sub notice (@) {
     my $self = shift;
     return unless ( $self->{verbose} );
     print STDERR "\t\033[36mHermes::notice:\033[0m ", @_, "\n";
@@ -430,27 +429,6 @@ unset, if you want so) the `C<transmission_html_encode>' option so that the
 characters are encoded with HTML::Entities; this is discouraged for
 I<login> requests.
 
-=back
-
-=head1 DEPENDENCIES
-
-=over
-
-=item *
-
-C<YAML::XS>, version 0.38 or later;
-
-=item *
-
-C<LWP::UserAgent>, version 6.03 or later;
-
-=item *
-
-C<LWP::Protocol::https>, version 6.03 or later;
-
-=item *
-
-C<HTML::Entities>, version 3.69 or later.
 
 =back
 
