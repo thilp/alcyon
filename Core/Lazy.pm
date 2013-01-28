@@ -9,7 +9,7 @@ use DateTime 0.76;
 
 our $DEFAULT_TIMEOUT = 1800;    # half an hour
 
-sub new {
+sub new ($$%) {
     my ($class, $id, $codeblock, %query) = @_;
     my $self = { id => $id };
 

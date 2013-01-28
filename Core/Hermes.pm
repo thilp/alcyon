@@ -3,22 +3,26 @@ package Alcyon::Core::Hermes;
 use strict;
 use warnings;
 use 5.010;
+use autodie;
+
+our $VERSION = 1.3;
+
+use Data::Dumper;
 
 use Carp;
 use YAML::XS 0.38;
-use LWP::UserAgent 6.03;
-use LWP::Protocol::https 6.03;
-use HTML::Entities 3.69;
+use LWP::UserAgent 6.03 qw(post);
+use LWP::Protocol::https 6.03 '';
+use HTML::Entities 3.69 qw(encode_entities);
 
 # Think at Term::ReadPassword if you want to dynamically ask the
 # user its password (or if you don't want to store it in
 # the code, which seems a perfect attitude to me).
 
-our $VERSION = 1.2;
+use constant COOKIE_FILE => '.cookies.txt';
 
 our $_instance = undef;
 our %params    = ();
-our %lazyness  = {};
 
 ######################################################################
 
@@ -39,10 +43,10 @@ sub get {
         }{lc $1}exi;
 
         $_instance->{ua} = LWP::UserAgent->new(
-            agent =>
-"Hermes/$VERSION (Hyperion/6; +http://fr.vikidia.org/wiki/user:thilp)",
+            agent => "Hermes/$VERSION (Hyperion/6; "
+              . "+http://fr.vikidia.org/wiki/user:thilp)",
             from       => 'thilp.is@gmail.com',
-            cookie_jar => { file => '.cookies.txt', autosave => 1 },
+            cookie_jar => { file => COOKIE_FILE, autosave => 1 },
             max_size   => 2_000_000,
             timeout    => 10,
             protocols_allowed => [ 'http', 'https' ],
@@ -52,23 +56,65 @@ sub get {
             # options of LWP
         );
 
+        # Must get the MediaWiki version number
+        # action=query&meta=siteinfo&siprop=general&format=xml
+        $_instance->{mwversion} = do {
+            my $answer = $_instance->{ua}->post(
+                $_instance->{url},
+                Content_Type => 'application/x-www-form-urlencoded',
+                Content      => {
+                    action => 'query',
+                    meta   => 'siteinfo',
+                    siprop => 'general',
+                    format => 'xml'
+                }
+            );
+            my $tmp = 1.0;
+            if ( $answer->is_success ) {
+                my ( $m, $v, $s ) =
+                  $answer->decoded_content( raise_error => 1 ) =~
+                  /\bgenerator="MediaWiki (\d+)\.(\d+)\.(\d+)"/;
+                if ( defined $m and defined $v and defined $s ) {
+                    $_instance->notice( 'got version number '
+                          . ( $m + $v * 0.001 + $s * 0.000001 )
+                          . ' for the MediaWiki system' );
+                    $tmp = $m + $v * 0.001 + $s * 0.000001;
+                }
+            }
+
+            $tmp;
+        };
+        $_instance->notice( 'version number for the MediaWiki system: '.
+            $_instance->{mwversion} );
+
         if ( exists $args{username} and exists $args{password} )
         {    # authentified
             $_instance->notice('setting up an authentified connection');
             $_instance->{username} = $args{username};
-            $_instance->_login( $args{password} );
+            $_instance->_login( $args{password} ) or die "Login failed";
         }
         else {    # anonymous connection
             $_instance->notice('setting up an anonymous connection');
         }
 
-        %params = %args;
+        our %params = %args;
     }
 
     return sub {
-        my $query = shift;
-        return $_instance->_ask($query);
-      }
+        my $query = do {
+            if   ( ref $_[0] eq 'HASH' ) { $_[0] }
+            else                         { my %tmp = @_; \%tmp }
+        };
+        return unless ref $query eq 'HASH';
+        if ( exists $query->{':get'} ) {
+            return $_instance->{ $query->{':get'} }
+              if exists $_instance->{ $query->{':get'} };
+            return;
+        }
+        else {
+            return $_instance->_ask($query);
+        }
+    };
 }
 
 ######################################################################
@@ -92,11 +138,18 @@ sub _login {
 
     return 0 unless exists $self->{username} and defined $password;
 
-    my $answ = $self->_ask(
+    if (cookie_ok( $self->{username} )) {
+        $self->notice("using existing cookie. ",
+            "If the connection does not work, delete ", COOKIE_FILE,
+            " and retry.");
+        return 1;
+    }
+
+    my $answ = $self->_ask({
         action     => 'login',
         lgname     => $self->{username},
         lgpassword => $password
-    );
+    });
     if ( not defined $answ ) {
         croak "Can't get an answer from the API: aborting";
     }
@@ -107,12 +160,12 @@ sub _login {
     }
     ################
     elsif ( $answ->{login}{result} eq 'NeedToken' ) {
-        $answ = $self->_ask(
+        $answ = $self->_ask({
             action     => 'login',
             lgname     => $self->{username},
             lgpassword => $password,
             lgtoken    => $answ->{login}{token}
-        );
+        });
         if ( $answ->{login}{result} eq 'Success' ) {
             $self->{sessionid} = $answ->{login}{sessionid};
             $self->notice("you are now logged in as $self->{username}");
@@ -133,14 +186,30 @@ EOF
     }
 
     # Get edit token.
-    $answ = $self->_ask(
-        action  => 'query',
-        titles  => 'Utilisateur:Alcyon',
-        prop    => 'info',
-        intoken => 'edit'
-    );
-    my ($tmp) = values %{ $answ->{query}{pages} };
-    $self->{edittoken} = $tmp->{edittoken};
+    if ( $self->{mwversion} >= 1.020 ) {
+        $answ = $self->_ask({
+                action => 'tokens',
+                type   => 'block|delete|edit|email|import|move|options|patrol|'
+                  . 'protect|unblock|watch',
+                ':quiet' => 1,
+            });
+        while ( my ( $k, $v ) = each %{ $answ->{tokens} } ) {
+            $self->{$k} = $v;
+        }
+    }
+    else {
+        $answ = $self->_ask({
+                action    => 'query',
+                generator => 'random',
+                prop      => 'info',
+                intoken   => 'edit|delete|protect|move|block|unblock|'
+                  . 'email|import',
+                ':quiet'  => 1,
+            });
+        while ( my ( $k, $v ) = each %{ $answ->{query}{pages}[0] } ) {
+            $self->{$k} = $v if $k =~ /^\w+token$/;
+        }
+    }
 
     return 1;
 }
@@ -148,8 +217,10 @@ EOF
 ######################################################################
 
 sub _ask {
-    my ( $self, %args ) = @_;
+    my $self = shift;
+    my %args = %{ $_[0] };
 
+    my $quiet = exists $args{':quiet'};
     if ( $args{transmission_html_encode} ) {
         delete $args{transmission_html_encode};
         %args = map( { encode_entities $_ } %args );
@@ -177,6 +248,18 @@ $@
 The server's answer was:
 @{[ $answer->decoded_content ]}
 EOF
+            unless ($quiet) {
+                if ( ref $r eq 'HASH' and exists $r->{warnings} ) {
+                    carp "Warning: server produced the following warnings:\n",
+                      Dumper( $r->{warnings} ), "returning the result.\n";
+                }
+                if ( ref $r eq 'HASH' and exists $r->{errors} ) {
+                    carp
+                      "Warning: server produced the following error notices:\n",
+                      Dumper( $r->{errors} ), "returning undef.\n";
+                    return;
+                }
+            }
             return $r;
         }
         else {
@@ -197,13 +280,6 @@ EOF
 
 ######################################################################
 
-sub lazy ($&@) {
-    my ( $class, $codeblock, %query ) = @_;
-
-}
-
-######################################################################
-
 sub notice {
     my $self = shift;
     return unless ( $self->{verbose} );
@@ -215,9 +291,21 @@ sub notice {
 
 sub DESTROY {
     my $self = shift;
-    $self->_ask( action => 'logout' );
+    $self->_ask({ action => 'logout' });
     $self->notice("user $self->{username} logged out");
     return;
+}
+
+######################################################################
+
+sub cookie_ok {
+    my $username = shift;
+    return 0 unless -f COOKIE_FILE;
+    open my $fh, '<', COOKIE_FILE or return 0;
+    while (<$fh>) {
+        return 1 if $_ =~ /_UserName=$username;\s/;
+    }
+    return 0;
 }
 
 ######################################################################
@@ -341,51 +429,6 @@ In addition to the traditional API parameters, you can set (or explicitely
 unset, if you want so) the `C<transmission_html_encode>' option so that the
 characters are encoded with HTML::Entities; this is discouraged for
 I<login> requests.
-
-=item C<lazy {> I<operations> C<} %params >
-
-This method allows Hermes to be B<lazy>, which is a great virtue when using
-the network.
-
-C<%params> is exactly what you would use with a Hermes closure (i.e. the
-parameters to be given to the MediaWiki API) plus an optional key (see below).
-However, lazy() does not return the data as the closure does; what is
-returned is an C<Alcyon::Core::Hermes::Lazy> object that does not really
-call the API right now.
-Instead, it stores the query (C<%params>) and the related extraction code (the
-I<operations> code block) and, when the API is contacted for some other
-(but similar) request, this query will be included too.
-
-This way:
-
-=over
-
-=item 1.
-
-Data that will eventually never be used are never fetched.
-
-=item 2.
-
-Data that are frequently used (but rarely changes) are fetched only once.
-
-=back
-
-You can set the I<timeout> (after this duration, the data are considered as
-too old and are refreshed when needed) with the optional C<timeout> key in
-C<%params>:
-
-    my $editcount = Alcyon::Core::Hermes->lazy
-        { $_->{query}{users}[0]{editcount} } # get the desired value
-        (
-            action => 'query',
-            list => 'users',
-            ususers => 'Alcyon',
-            usprop => 'editcount',
-            timeout => 60           # timeout after 1 minute
-        );
-
-See the documentation of C<Alcyon::Core::Hermes::Lazy> for how to use such
-objects.
 
 =back
 
